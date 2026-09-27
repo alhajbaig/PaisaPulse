@@ -145,19 +145,26 @@ export default function SpendValueCard({
         )}
 
         {/* Smart Cut Target */}
-        {cutTarget && (
-          <div className="p-3.5 rounded-2xl bg-rose-50/70 border border-rose-200/80 text-left space-y-1">
-            <div className="flex items-center gap-1.5 text-[11px] font-accent uppercase tracking-wider text-rose-900 font-bold">
-              <TrendingDown className="w-3.5 h-3.5 text-rose-600 shrink-0" />
-              <span>{language === 'hinglish' ? `Yahan Bachao: ${cutTarget.name}` : `Review: ${cutTarget.name}`}</span>
+        {cutTarget && (() => {
+          const targetSavings = Math.min(
+            cutTarget.monthlyCost,
+            cutTarget.suggestedAction?.savings || Math.round(cutTarget.monthlyCost * 0.25)
+          ) || Math.round(cutTarget.monthlyCost * 0.25) || 50;
+
+          return (
+            <div className="p-3.5 rounded-2xl bg-rose-50/70 border border-rose-200/80 text-left space-y-1">
+              <div className="flex items-center gap-1.5 text-[11px] font-accent uppercase tracking-wider text-rose-900 font-bold">
+                <TrendingDown className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                <span>{language === 'hinglish' ? `Yahan Bachao: ${cutTarget.name}` : `Review: ${cutTarget.name}`}</span>
+              </div>
+              <p className="text-[11px] font-sans text-rose-950 leading-snug">
+                {language === 'hinglish'
+                  ? `Har mahine ~${formatINR(cutTarget.monthlyCost)} jaata hai bina kisi khaas faayde ke. 25% kam karke aasaani se ~${formatINR(targetSavings)}/mahina bacha sakte ho.`
+                  : `Takes ~${formatINR(cutTarget.monthlyCost)}/mo with lower value return. Trim 25% to free up ~${formatINR(targetSavings)}/mo safely.`}
+              </p>
             </div>
-            <p className="text-[11px] font-sans text-rose-950 leading-snug">
-              {language === 'hinglish'
-                ? `Har mahine ~${formatINR(cutTarget.monthlyCost)} jaata hai bina kisi khaas faayde ke. 25% kam karke aasaani se ~${formatINR(insights?.potentialMonthlySavings || 500)}/mahina bacha sakte ho.`
-                : `Takes ~${formatINR(cutTarget.monthlyCost)}/mo with lower value return. Trim 25% to free up ~{formatINR(insights?.potentialMonthlySavings || 500)}/mo safely.`}
-            </p>
-          </div>
-        )}
+          );
+        })()}
       </div>
     </div>
   );
