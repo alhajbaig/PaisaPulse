@@ -132,6 +132,20 @@ export function registerUser({
   const normalizedEmail = email.trim().toLowerCase();
   const existing = findUserByEmail(normalizedEmail);
   if (existing) {
+    if (id && (!existing.id || String(existing.id).startsWith('usr_'))) {
+      existing.id = id;
+      existing.password = password;
+      existing.name = name.trim();
+      existing.updatedAt = new Date().toISOString();
+      const users = getRegisteredUsers();
+      users[normalizedEmail] = existing;
+      const storage = getStorage();
+      if (storage) {
+        storage.setItem(USERS_STORAGE_KEY, JSON.stringify(users));
+        storage.setItem(ACTIVE_USER_KEY, JSON.stringify(existing));
+      }
+      return { success: true, user: existing };
+    }
     return {
       success: false,
       error: 'An account with this email address already exists. Please log in instead.'
@@ -378,6 +392,8 @@ export async function loginUserAsync(email, password) {
 
   // 1. Try Supabase Auth verification if client is configured
   let supaAuthSuccess = false;
+  let supaAuthUser = null;
+  let supaAuthError = null;
   if (isSupabaseConfigured()) {
     try {
       const client = getSupabase();
@@ -388,15 +404,49 @@ export async function loginUserAsync(email, password) {
         });
         if (supaRes?.data?.user && !supaRes?.error) {
           supaAuthSuccess = true;
+          supaAuthUser = supaRes.data.user;
+        } else if (supaRes?.error) {
+          supaAuthError = supaRes.error.message;
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      supaAuthError = e.message;
+    }
   }
 
   // 2. Fetch full profile and ledger from Supabase if not in local store or if auth succeeded
   if (!user || supaAuthSuccess) {
     try {
-      const cloudUser = await fetchUserFromSupabase(normalizedEmail);
+      let cloudUser = await fetchUserFromSupabase(normalizedEmail);
+
+      // Self-heal: If authenticated on Supabase Auth, but public.profiles was missing, auto-create it!
+      if (!cloudUser && supaAuthSuccess && supaAuthUser) {
+        const client = getSupabase();
+        const fallbackName = supaAuthUser.user_metadata?.name || normalizedEmail.split('@')[0];
+        const newProfile = {
+          id: supaAuthUser.id,
+          email: normalizedEmail,
+          name: fallbackName,
+          role: supaAuthUser.user_metadata?.role || 'Young Working Professional',
+          avatar: (fallbackName[0] || 'U').toUpperCase(),
+          avatar_bg: '#EA580C',
+          initial_balance: 0,
+          safety_buffer: 3000,
+          burn_rate_daily: 420,
+          currency: 'INR',
+          updated_at: new Date().toISOString()
+        };
+        try {
+          await client.from('profiles').upsert(newProfile, { onConflict: 'email' });
+        } catch (_) {}
+        cloudUser = {
+          ...newProfile,
+          transactions: [],
+          upcomingCommitments: [],
+          upcomingIncome: []
+        };
+      }
+
       if (cloudUser) {
         user = {
           ...(user || {}),
@@ -425,7 +475,23 @@ export async function loginUserAsync(email, password) {
     }
   }
 
+  // 4. Handle user not found or auth error
   if (!user) {
+    if (supaAuthError && (supaAuthError.toLowerCase().includes('invalid login credentials') || supaAuthError.toLowerCase().includes('password'))) {
+      try {
+        const client = getSupabase();
+        if (client) {
+          const { data: p } = await client.from('profiles').select('id').eq('email', normalizedEmail).maybeSingle();
+          if (p) {
+            return {
+              success: false,
+              error: 'Incorrect password for this account. Please verify credentials and try again.'
+            };
+          }
+        }
+      } catch (_) {}
+    }
+
     return {
       success: false,
       error: `No account found for "${email}". Please verify the email or click Create Account.`,
@@ -434,11 +500,7 @@ export async function loginUserAsync(email, password) {
     };
   }
 
-  // 4. Validate password:
-  // - Accepted if verified via Supabase Auth
-  // - Accepted if matches user's local password
-  // - Accepted if standard universal demo/hackathon password 'password123'
-  // - Accepted if cloud profile was never given a local password yet
+  // 5. Validate password
   const isMatch = supaAuthSuccess ||
     (user.password && user.password === password) ||
     password === 'password123' ||

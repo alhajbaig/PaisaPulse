@@ -125,7 +125,8 @@ export default function TransactionsView({
 
         <div className="flex flex-wrap items-center gap-2.5">
           <button 
-            className="px-4 py-2 rounded-full bg-ivory border border-line-medium text-xs font-sans text-ink hover:border-line-dark transition-all flex items-center gap-2"
+            id="import-csv-btn"
+            className="px-4 py-2 rounded-full bg-ivory border border-line-medium text-xs font-sans text-ink hover:border-line-dark transition-all flex items-center gap-2 cursor-pointer"
             onClick={onOpenCSVImport}
             title="Upload CSV statement with custom column mapping"
           >

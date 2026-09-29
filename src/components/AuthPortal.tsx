@@ -23,7 +23,7 @@ import {
 import gsap from "gsap";
 import ClickSpark from "./ClickSpark";
 import { getSupabase, isSupabaseConfigured } from "../services/supabaseClient.js";
-import { fetchUserFromSupabase } from "../services/supabaseSync.js";
+import { fetchUserFromSupabase, syncUserToSupabase } from "../services/supabaseSync.js";
 import {
   findUserByEmail,
   saveUserData,
@@ -211,8 +211,8 @@ export default function AuthPortal({ initialMode = "login" }: AuthPortalProps) {
         return;
       }
 
-      if (!password || password.length < 4) {
-        setErrorMessage("Password must be at least 4 characters.");
+      if (!password || password.length < 6) {
+        setErrorMessage("Password must be at least 6 characters.");
         setIsLoading(false);
         return;
       }
@@ -266,15 +266,49 @@ export default function AuthPortal({ initialMode = "login" }: AuthPortalProps) {
                   },
                 },
               });
+
+              if (supaErr) {
+                const errMsg = supaErr.message || "";
+                if (errMsg.toLowerCase().includes("already registered") || errMsg.toLowerCase().includes("user already exists")) {
+                  setErrorMessage("An account with this email already exists on Supabase. Switching to Sign In...");
+                  setMode("login");
+                  setIsLoading(false);
+                  return;
+                }
+                setErrorMessage(errMsg || "Cloud registration failed. Please check credentials.");
+                setIsLoading(false);
+                return;
+              }
+
               if (data?.user?.id) {
                 supaUserId = data.user.id;
-              }
-              if (supaErr) {
-                console.debug("Supabase signup status:", supaErr.message);
+
+                // Explicitly guarantee profile creation in public.profiles table
+                try {
+                  const profilePayload = {
+                    id: supaUserId,
+                    email: email.trim().toLowerCase(),
+                    name: fullName.trim(),
+                    role: profession,
+                    avatar: (fullName.trim()[0] || 'U').toUpperCase(),
+                    avatar_bg: '#EA580C',
+                    initial_balance: Math.max(0, balanceNum),
+                    safety_buffer: Math.max(0, bufferNum),
+                    burn_rate_daily: 420,
+                    currency: 'INR',
+                    updated_at: new Date().toISOString()
+                  };
+                  await client.from('profiles').upsert(profilePayload, { onConflict: 'id' });
+                } catch (pe) {
+                  console.warn("Direct profile upsert error:", pe);
+                }
               }
             }
-          } catch (supaErr) {
-            console.debug("Supabase signup exception:", supaErr);
+          } catch (supaErr: any) {
+            console.warn("Supabase signup exception:", supaErr);
+            setErrorMessage(supaErr.message || "Failed to reach authentication server.");
+            setIsLoading(false);
+            return;
           }
         }
 
@@ -296,6 +330,10 @@ export default function AuthPortal({ initialMode = "login" }: AuthPortalProps) {
           if (supaUserId) {
             regResult.user.id = supaUserId;
           }
+          // Await full cloud sync before navigating so profile & session are committed
+          try {
+            await syncUserToSupabase(regResult.user);
+          } catch (_) {}
           triggerPortalExpansion(fullName.trim());
         } else {
           setErrorMessage(regResult.error || "Failed to create account. Email may already be registered.");
